@@ -2,118 +2,74 @@ import os
 import sys
 from dataclasses import dataclass
 
-from catboost import CatBoostRegressor
-from sklearn.ensemble import (
-    AdaBoostRegressor,
-    GradientBoostingRegressor,
-    RandomForestRegressor,
-)
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.tree import DecisionTreeRegressor
-from xgboost import XGBRegressor
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
+from sklearn.metrics import roc_auc_score, f1_score, make_scorer
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import GridSearchCV
+from xgboost import XGBClassifier
+from catboost import CatBoostClassifier
 
 from src.exception import CustomException
 from src.logger import logging
-
-from src.utils import save_object,evaluate_models
+from src.utils import save_object, evaluate_models
 
 @dataclass
 class ModelTrainerConfig:
-    trained_model_file_path=os.path.join("artifacts","model.pkl")
+    trained_model_file_path = os.path.join("artifacts", "model.pkl")
 
 class ModelTrainer:
     def __init__(self):
-        self.model_trainer_config=ModelTrainerConfig()
+        self.model_trainer_config = ModelTrainerConfig()
 
-
-    def initiate_model_trainer(self,train_array,test_array):
+    def initiate_model_trainer(self, train_array, test_array):
         try:
-            logging.info("Split training and test input data")
-            X_train,y_train,X_test,y_test=(
-                train_array[:,:-1],
-                train_array[:,-1],
-                test_array[:,:-1],
-                test_array[:,-1]
+            logging.info("Splitting training and test input data")
+            X_train, y_train, X_test, y_test = (
+                train_array[:, :-1],
+                train_array[:, -1],
+                test_array[:, :-1],
+                test_array[:, -1]
             )
             models = {
-                "Random Forest": RandomForestRegressor(),
-                "Decision Tree": DecisionTreeRegressor(),
-                "Gradient Boosting": GradientBoostingRegressor(),
-                "Linear Regression": LinearRegression(),
-                "XGBRegressor": XGBRegressor(),
-                "CatBoosting Regressor": CatBoostRegressor(verbose=False),
-                "AdaBoost Regressor": AdaBoostRegressor(),
+                "Random Forest": RandomForestClassifier(),
+                "Decision Tree": DecisionTreeClassifier(),
+                "Gradient Boosting": GradientBoostingClassifier(),
+                "XGB Classifier": XGBClassifier(use_label_encoder=False, eval_metric='logloss'),
+                "CatBoost Classifier": CatBoostClassifier(verbose=False),
+                "AdaBoost Classifier": AdaBoostClassifier()
             }
-            params={
-                "Decision Tree": {
-                    'criterion':['squared_error', 'friedman_mse', 'absolute_error', 'poisson'],
-                    # 'splitter':['best','random'],
-                    # 'max_features':['sqrt','log2'],
-                },
-                "Random Forest":{
-                    # 'criterion':['squared_error', 'friedman_mse', 'absolute_error', 'poisson'],
-                 
-                    # 'max_features':['sqrt','log2',None],
-                    'n_estimators': [8,16,32,64,128,256]
-                },
-                "Gradient Boosting":{
-                    # 'loss':['squared_error', 'huber', 'absolute_error', 'quantile'],
-                    'learning_rate':[.1,.01,.05,.001],
-                    'subsample':[0.6,0.7,0.75,0.8,0.85,0.9],
-                    # 'criterion':['squared_error', 'friedman_mse'],
-                    # 'max_features':['auto','sqrt','log2'],
-                    'n_estimators': [8,16,32,64,128,256]
-                },
-                "Linear Regression":{},
-                "XGBRegressor":{
-                    'learning_rate':[.1,.01,.05,.001],
-                    'n_estimators': [8,16,32,64,128,256]
-                },
-                "CatBoosting Regressor":{
-                    'depth': [6,8,10],
-                    'learning_rate': [0.01, 0.05, 0.1],
-                    'iterations': [30, 50, 100]
-                },
-                "AdaBoost Regressor":{
-                    'learning_rate':[.1,.01,0.5,.001],
-                    # 'loss':['linear','square','exponential'],
-                    'n_estimators': [8,16,32,64,128,256]
-                }
-                
+            params = {
+                "Decision Tree": {'criterion': ['gini', 'entropy'], 'max_depth': [10, 15, 20, None]},
+                "Random Forest": {'n_estimators': [50, 100, 200], 'max_features': ['auto', 'sqrt'], 'criterion': ['gini', 'entropy']},
+                "Gradient Boosting": {'learning_rate': [0.01, 0.1, 0.2], 'n_estimators': [100, 200, 300]},
+                "XGB Classifier": {'learning_rate': [0.01, 0.1, 0.2], 'n_estimators': [100, 200, 300], 'max_depth': [3, 5, 7]},
+                "CatBoost Classifier": {'depth': [4, 6, 10], 'learning_rate': [0.01, 0.05, 0.1], 'iterations': [50, 100, 200]},
+                "AdaBoost Classifier": {'learning_rate': [0.01, 0.1, 0.5], 'n_estimators': [50, 100, 200]}
             }
+            auc_scorer = make_scorer(roc_auc_score, needs_proba=True, multi_class='ovo')
+            f1_scorer = make_scorer(f1_score, average='weighted')
 
-            model_report:dict=evaluate_models(X_train=X_train,y_train=y_train,X_test=X_test,y_test=y_test,
-                                             models=models,param=params)
-            
-            ## To get best model score from dict
-            best_model_score = max(sorted(model_report.values()))
+            model_report = evaluate_models(X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+                                           models=models, param=params, scorer=f1_scorer)
 
-            ## To get best model name from dict
-
-            best_model_name = list(model_report.keys())[
-                list(model_report.values()).index(best_model_score)
-            ]
+            best_model_score = max(model_report.values(), key=lambda x: x['test_score'])
+            best_model_name = next(name for name, report in model_report.items() if report['test_score'] == best_model_score['test_score'])
             best_model = models[best_model_name]
 
-            if best_model_score<0.6:
+            if best_model_score['test_score'] < 0.85:  # Adjust the threshold as needed
                 raise CustomException("No best model found")
-            logging.info(f"Best found model on both training and testing dataset")
+            logging.info(f"Best model found: {best_model_name} with score {best_model_score['test_score']}")
 
             save_object(
                 file_path=self.model_trainer_config.trained_model_file_path,
                 obj=best_model
             )
 
-            predicted=best_model.predict(X_test)
+            predicted = best_model.predict(X_test)
+            accuracy = f1_score(y_test, predicted, average='weighted')
+            roc_auc = roc_auc_score(y_test, predicted, average='macro', multi_class='ovo')
+            return accuracy, roc_auc
 
-            r2_square = r2_score(y_test, predicted)
-            return r2_square
-            
-
-
-
-            
         except Exception as e:
-            raise CustomException(e,sys)
+            raise CustomException(e, sys)
+

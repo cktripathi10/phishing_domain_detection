@@ -3,60 +3,63 @@ import sys
 
 import numpy as np 
 import pandas as pd
-import dill
-import pickle
-from sklearn.metrics import r2_score
+import dill  # Using dill for potentially more complex objects
+from sklearn.metrics import accuracy_score  # Assuming classification task
 from sklearn.model_selection import GridSearchCV
 
-from src.exception import CustomException
+from src.exception import CustomException  # Custom exception handling
 
 def save_object(obj, file_path):
+    """ Saves an object to a specified path using dill. """
     try:
         dir_path = os.path.dirname(file_path)
-
-        os.makedirs(dir_path, exist_ok=True)
+        os.makedirs(dir_path, exist_ok=True)  # Ensure directory exists
 
         with open(file_path, "wb") as file_obj:
-            pickle.dump(obj, file_obj)
+            dill.dump(obj, file_obj)  # Use dill to dump the object
 
     except Exception as e:
-        raise CustomException(e, sys)
-    
-def evaluate_models(X_train, y_train,X_test,y_test,models,param):
+        raise CustomException(str(e), sys.exc_info())  # Enhanced exception information
+
+def evaluate_models(X_train, y_train, X_test, y_test, models, params):
+    """ Evaluates models using GridSearchCV and returns a report with model performance metrics. """
     try:
         report = {}
 
-        for i in range(len(list(models))):
-            model = list(models.values())[i]
-            para=param[list(models.keys())[i]]
+        for model_name, model in models.items():
+            param = params[model_name]
+            gs = GridSearchCV(model, param, cv=3)
+            gs.fit(X_train, y_train)
 
-            gs = GridSearchCV(model,para,cv=3)
-            gs.fit(X_train,y_train)
+            # Best model retraining
+            best_model = gs.best_estimator_
+            best_model.fit(X_train, y_train)
 
-            model.set_params(**gs.best_params_)
-            model.fit(X_train,y_train)
+            # Predictions
+            y_train_pred = best_model.predict(X_train)
+            y_test_pred = best_model.predict(X_test)
 
-            #model.fit(X_train, y_train)  # Train model
+            # Model performance
+            train_model_score = accuracy_score(y_train, y_train_pred)  # Assuming accuracy metric
+            test_model_score = accuracy_score(y_test, y_test_pred)
 
-            y_train_pred = model.predict(X_train)
-
-            y_test_pred = model.predict(X_test)
-
-            train_model_score = r2_score(y_train, y_train_pred)
-
-            test_model_score = r2_score(y_test, y_test_pred)
-
-            report[list(models.keys())[i]] = test_model_score
+            report[model_name] = {
+                'train_score': train_model_score,
+                'test_score': test_model_score,
+                'best_params': gs.best_params_
+            }
 
         return report
 
     except Exception as e:
-        raise CustomException(e, sys)
-    
+        raise CustomException(str(e), sys.exc_info())
+
 def load_object(file_path):
+    """ Loads an object from a specified path using dill. """
     try:
         with open(file_path, "rb") as file_obj:
-            return pickle.load(file_obj)
+            return dill.load(file_obj)  # Use dill to load the object
 
     except Exception as e:
-        raise CustomException(e, sys)
+        raise CustomException(str(e), sys.exc_info())
+
