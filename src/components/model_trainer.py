@@ -33,31 +33,36 @@ class ModelTrainer:
             models = {
                 "Random Forest": RandomForestClassifier(),
                 "Decision Tree": DecisionTreeClassifier(),
-                "Gradient Boosting": GradientBoostingClassifier(),
-                "XGB Classifier": XGBClassifier(use_label_encoder=False, eval_metric='logloss'),
-                "CatBoost Classifier": CatBoostClassifier(verbose=False),
-                "AdaBoost Classifier": AdaBoostClassifier()
+                #"Gradient Boosting": GradientBoostingClassifier(),
+                #"XGB Classifier": XGBClassifier(use_label_encoder=False, eval_metric='logloss'),
+                #"CatBoost Classifier": CatBoostClassifier(verbose=False),
+                #"AdaBoost Classifier": AdaBoostClassifier(algorithm='SAMME')
             }
             params = {
                 "Decision Tree": {'criterion': ['gini', 'entropy'], 'max_depth': [10, 15, 20, None]},
-                "Random Forest": {'n_estimators': [50, 100, 200], 'max_features': ['auto', 'sqrt'], 'criterion': ['gini', 'entropy']},
-                "Gradient Boosting": {'learning_rate': [0.01, 0.1, 0.2], 'n_estimators': [100, 200, 300]},
-                "XGB Classifier": {'learning_rate': [0.01, 0.1, 0.2], 'n_estimators': [100, 200, 300], 'max_depth': [3, 5, 7]},
-                "CatBoost Classifier": {'depth': [4, 6, 10], 'learning_rate': [0.01, 0.05, 0.1], 'iterations': [50, 100, 200]},
-                "AdaBoost Classifier": {'learning_rate': [0.01, 0.1, 0.5], 'n_estimators': [50, 100, 200]}
+                "Random Forest": {'n_estimators': [50, 100, 200], 'max_features': ['sqrt'], 'criterion': ['gini', 'entropy']},
+                #"Gradient Boosting": {'learning_rate': [0.01, 0.1, 0.2], 'n_estimators': [100, 200, 300]},
+                #"XGB Classifier": {'learning_rate': [0.01, 0.1, 0.2], 'n_estimators': [100, 200, 300], 'max_depth': [3, 5, 7]},
+                #"CatBoost Classifier": {'depth': [4, 6, 10], 'learning_rate': [0.01, 0.05, 0.1], 'iterations': [50, 100, 200]},
+                #"AdaBoost Classifier": {'learning_rate': [0.01, 0.1, 0.5], 'n_estimators': [50, 100, 200]}
             }
-            auc_scorer = make_scorer(roc_auc_score, needs_proba=True, multi_class='ovo')
-            f1_scorer = make_scorer(f1_score, average='weighted')
+            scorers = {
+                'AUC': make_scorer(roc_auc_score, response_method='predict_proba', multi_class='ovo'),
+                'F1': make_scorer(f1_score, average='weighted')
+            }
 
             model_report = evaluate_models(X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
-                                           models=models, param=params, scorer=f1_scorer)
+                                           models=models, params=params, scorers=scorers)
 
             best_model_score = max(model_report.values(), key=lambda x: x['test_score'])
             best_model_name = next(name for name, report in model_report.items() if report['test_score'] == best_model_score['test_score'])
             best_model = models[best_model_name]
 
+            logging.info(f"Training {best_model_name} with best parameters.")
+            best_model.fit(X_train, y_train)  # Ensure model is retrained on the entire training set
+
             if best_model_score['test_score'] < 0.85:  # Adjust the threshold as needed
-                raise CustomException("No best model found")
+                raise CustomException("No best model found with sufficient score.")
             logging.info(f"Best model found: {best_model_name} with score {best_model_score['test_score']}")
 
             save_object(
@@ -71,5 +76,6 @@ class ModelTrainer:
             return accuracy, roc_auc
 
         except Exception as e:
+            logging.error("Error during model training or prediction: {}".format(e), exc_info=True)
             raise CustomException(e, sys)
 
